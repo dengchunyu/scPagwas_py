@@ -37,12 +37,10 @@ adata.write("/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedri
 import pandas as pd
 import os
 import csv
+
 os.chdir('/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/data/')
-
-
 # 打开文件并指定制表符为分隔符
 gwas_data = pd.read_csv('GWAS_summ_example.txt', sep=' ')
-
 #pathway data
 pathway_data = {}
 with open('Genes_by_pathway_kegg.csv', mode='r', encoding='utf-8') as file:
@@ -52,19 +50,12 @@ with open('Genes_by_pathway_kegg.csv', mode='r', encoding='utf-8') as file:
         pathway = row[0]
         genes = row[1].split(',')
         pathway_data[pathway] = genes
-
-# 打印结果
-print(pathway_data)
-
 #block_annotation
-
 block_annotation = pd.read_csv("block_annotation.csv")
-
 #chrom_LD
 # 定义存储数据的字典
 chrom_LD = {}
 os.chdir('/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/data/LD')
-
 # 读取每个CSV文件并存储到字典中
 for i in range(1, 23):
     file_name = f'{i}.csv'
@@ -74,15 +65,31 @@ for i in range(1, 23):
 
 ```
 
-## Run scPagwas
+## Run the input data
 
 ```python
-adata = sc.read_h5ad("/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/data/scdata.adata")
-Pagwas = scdata_process(Pagwas=None,adata=adata, cell_type_col='cell.types')
-Pagwas = GWAS_summary_input(Pagwas=Pagwas, gwas_data=gwas_data)
+os.chdir('/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/src/scPagwas_py')
+import input_pp
+import importlib
+import scanpy as sc
+#arch -arm64 brew install bedtools
 
-Pathway_list=pathway_data
-min_pathway_size=10
-max_pathway_size=1000
+importlib.reload(input_pp)
+adata = sc.read_h5ad("/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/data/scdata.adata")
+Pagwas = input_pp.scdata_process(Pagwas=None,adata=adata, cell_type_col='cell.types')
+Pagwas = input_pp.GWAS_summary_input(Pagwas=Pagwas, gwas_data=gwas_data,block_annotation=block_annotation)
+Pagwas = input_pp.pathway_pcascore_run(Pagwas=Pagwas, Pathway_list=pathway_data, min_pathway_size=10, max_pathway_size=1000)
+Pagwas = input_pp.pathway_annotation_input(Pagwas=Pagwas, block_annotation=block_annotation)
+```
+
+## Run the regression method
+
+```python
+import regress_method
+importlib.reload(regress_method)
+Pagwas = regress_method.link_pathway_blocks_gwas(Pagwas=Pagwas, chrom_ld=chrom_LD, singlecell=True, celltype=True,n_cores=1)
+import get_score
+importlib.reload(get_score)
+Pagwas = get_score.sc_pagwas_perform_score(Pagwas=Pagwas, remove_outlier=True,Single_data=adata, random_times=100, iters_singlecell=100,n_topgenes=1000,n_jobs=2)
 
 ```
