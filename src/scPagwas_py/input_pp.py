@@ -58,11 +58,13 @@ def scdata_process(Pagwas=None,adata=None, cell_type_col='annotation'):
 def snp_to_gene(gwas_data, block_annotation, marg=10000):
     gwas_data['pos_start'] = gwas_data['pos']
     gwas_data['pos_end'] = gwas_data['pos']
-    gwas_bed = BedTool.from_dataframe(gwas_data[['chrom', 'pos_start', 'pos_end', 'rsid']]).sort()
+    #gwas_bed = BedTool.from_dataframe(gwas_data[['chrom', 'pos_start', 'pos_end', 'rsid']]).sort()
+    gwas_bed = BedTool.from_dataframe(gwas_data[['chrom', 'pos_start', 'pos_end', 'rsid']].sort_values(['chrom', 'pos_start']))
     block_annotation['start'] = block_annotation['start'] + 1 - marg
     block_annotation['start'] = block_annotation['start'].apply(lambda x: max(x, 0))
     block_annotation['end'] = block_annotation['end'] + marg
-    block_bed = BedTool.from_dataframe(block_annotation[['chrom', 'start', 'end', 'label']]).sort()
+    block_sorted = block_annotation[['chrom', 'start', 'end', 'label']].sort_values(by=['chrom', 'start', 'end'])
+    block_bed = BedTool.from_dataframe(block_sorted)
     nearest = gwas_bed.closest(block_bed, d=True)
     nearest_df = nearest.to_dataframe(names=['chrom', 'pos_start', 'pos_end', 'rsid', 
                                              'chrom_gene', 'gene_start', 'gene_end', 

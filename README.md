@@ -3,11 +3,17 @@
 ## install the scPagwas_py
 
 ```shell
+cd /share/pub/dengcy/
 git clone https://github.com/dengchunyu/scPagwas_py.git
 conda create -n scPagwas_env python=3.8
 conda activate scPagwas_env
 cd scPagwas_py
 pip install .
+
+#安装依赖包
+conda install -c bioconda bedtools
+pip install numpy pandas scikit-learn pybedtools dask statsmodels scipy joblib
+
 
 #update packages
 pip install --upgrade git+https://github.com/dengchunyu/scPagwas_py.git
@@ -37,7 +43,7 @@ sc.pp.filter_cells(adata, min_genes=200)
 sc.pp.normalize_total(adata)
 sc.pp.log1p(adata)
 #由于我们下载的数据自带分类标签信息，因此我们就不进行细胞聚类和注释了。
-adata.write("/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/data/scdata.adata")
+adata.write("/share/pub/dengcy/scPagwas_py/data/scdata.adata")
 ```
 
 ### other data
@@ -48,7 +54,7 @@ import pandas as pd
 import os
 import csv
 
-os.chdir('/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/data/')
+os.chdir('/share/pub/dengcy/scPagwas_py/data')
 # 打开文件并指定制表符为分隔符
 gwas_data = pd.read_csv('GWAS_summ_example.txt', sep=' ')
 #pathway data
@@ -65,7 +71,7 @@ block_annotation = pd.read_csv("block_annotation.csv")
 #chrom_LD
 # 定义存储数据的字典
 chrom_LD = {}
-os.chdir('/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/data/LD')
+os.chdir('/share/pub/dengcy/scPagwas_py/data/LD')
 # 读取每个CSV文件并存储到字典中
 for i in range(1, 23):
     file_name = f'{i}.csv'
@@ -78,14 +84,9 @@ for i in range(1, 23):
 ## Run the input data
 
 ```python
-os.chdir('/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/src/scPagwas_py')
-import input_pp
-import importlib
-import scanpy as sc
-#arch -arm64 brew install bedtools
-
-importlib.reload(input_pp)
-adata = sc.read_h5ad("/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/data/scdata.adata")
+from scPagwas_py import input_pp,regress_method,get_score
+os.chdir("/share/pub/dengcy/scPagwas_py/data")
+adata = sc.read_h5ad("scdata.adata")
 Pagwas = input_pp.scdata_process(Pagwas=None,adata=adata, cell_type_col='cell.types')
 Pagwas = input_pp.GWAS_summary_input(Pagwas=Pagwas, gwas_data=gwas_data,block_annotation=block_annotation)
 Pagwas = input_pp.pathway_pcascore_run(Pagwas=Pagwas, Pathway_list=pathway_data, min_pathway_size=10, max_pathway_size=1000)
@@ -96,7 +97,6 @@ Pagwas = input_pp.pathway_annotation_input(Pagwas=Pagwas, block_annotation=block
 
 ```python
 import regress_method
-importlib.reload(regress_method)
 Pagwas = regress_method.link_pathway_blocks_gwas(Pagwas=Pagwas, chrom_ld=chrom_LD, singlecell=True, celltype=True,n_cores=1)
 import get_score
 importlib.reload(get_score)
