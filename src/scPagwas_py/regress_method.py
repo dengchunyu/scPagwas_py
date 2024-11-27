@@ -2,8 +2,13 @@ import pandas as pd
 import numpy as np
 from dask import delayed, compute
 from dask.diagnostics import ProgressBar
-from sklearn.decomposition import PCA
-from scipy.sparse import csr_matrix
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+from statsmodels.regression.linear_model import OLS
+from statsmodels.tools.tools import add_constant
+import warnings
+from statsmodels.stats.multitest import multipletests
 
 def link_pathway_blocks_gwas(Pagwas, chrom_ld=None, singlecell=True, celltype=True, n_cores=1):
     # Split pathway blocks by chromosome
@@ -195,12 +200,6 @@ def link_pwpca_block(pa_block, pca_cell_df, merge_scexpr, snp_gene_df, rawPathwa
     return {key: pa_block[key] for key in ['x', 'y', 'snps', 'include_in_inference']}
 
 
-import numpy as np
-import pandas as pd
-from scipy.sparse import csr_matrix
-from sklearn.linear_model import LinearRegression
-from joblib import Parallel, delayed
-
 def get_pathway_sclm(pa_block, pca_scCell_mat, data_mat, rawPathway_list, n_cores=1, Rns='random_name'):
     pathway = pa_block['block_info']['pathway'].unique()[0]
     
@@ -288,12 +287,6 @@ def get_rows_by_index(pca_dict, row_names):
     # Return the corresponding rows as a numpy array
     return pca_dict['data'][row_indices, :]
 
-
-import numpy as np
-import pandas as pd
-from statsmodels.regression.linear_model import OLS
-from statsmodels.tools.tools import add_constant
-import warnings
 
 def Pagwas_perform_regression(Pathway_ld_gwas_data):
     print("** Start inference")
@@ -413,9 +406,6 @@ def Get_bootresults_df(value_collection, annotations, model_estimates):
     
     return result_df
 
-
-import pandas as pd
-from statsmodels.stats.multitest import multipletests
 
 def celltype_regression(Pagwas, iters_celltype, output_dirs, output_prefix):
     """

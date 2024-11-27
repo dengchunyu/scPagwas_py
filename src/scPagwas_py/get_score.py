@@ -2,6 +2,13 @@ import numpy as np
 import pandas as pd
 from scipy.sparse import csr_matrix
 from sklearn.linear_model import LinearRegression
+from scipy.stats import wilcoxon
+from statsmodels.stats.multitest import multipletests
+from joblib import Parallel, delayed
+from scipy.stats import mannwhitneyu
+from scipy.stats import norm
+from scipy import stats
+from statsmodels.stats import multitest
 
 def get_pathway_sclm(pa_block, pca_scCell_mat, data_mat, rawPathway_list, n_cores=1, backingpath='', Rns=''):
     pathway = np.unique(pa_block['block_info']['pathway'])
@@ -151,10 +158,6 @@ def merge_gPas(Pagwas, pmat_merge):
     return scPagwas_gPAS_score
 
 
-import numpy as np
-import pandas as pd
-from scipy.stats import wilcoxon
-from statsmodels.stats.multitest import multipletests
 
 
 def cor_sparse(X, Y):
@@ -191,9 +194,6 @@ def cor_sparse(X, Y):
     return cormat
 
 
-import numpy as np
-from joblib import Parallel, delayed
-
 def compute_random_correlation(datamat, gPas, select_num, random_times=100,n_jobs=1):
     sparse_cor_list = []
 
@@ -223,7 +223,6 @@ def compute_random_correlation(datamat, gPas, select_num, random_times=100,n_job
     sparse_cor_mean = np.mean(sparse_cor_df, axis=1)
     return sparse_cor_mean
 
-from scipy.stats import mannwhitneyu
 def sc_get_pcc2(Pagwas, random_times=100,n_jobs=1):
     """
     Compute PCC for each gene pathway in Pagwas object and adjust p-values using Wilcoxon test.
@@ -285,12 +284,6 @@ def sc_get_pcc2(Pagwas, random_times=100,n_jobs=1):
     return Pagwas
 
 
-
-import numpy as np
-import pandas as pd
-from scipy.stats import norm
-from scipy import stats
-from statsmodels.stats import multitest
 def get_correct_bg_p(data_mat, scPagwas_TRS_Score, iters_singlecell, n_topgenes, scPagwas_topgenes):
     # 获取 `data_mat` 和 `scPagwas_topgenes` 的交集基因
     genes = np.intersect1d(data_mat.index, scPagwas_topgenes)
@@ -427,14 +420,6 @@ def get_trs_score(Pagwas, Single_data, iters_singlecell, n_topgenes):
 
     return Pagwas
 
-
-from scipy import stats
-
-import numpy as np
-import pandas as pd
-
-import numpy as np
-import pandas as pd
 
 def add_module_score(data_mat, features, pool=None, nbin=24, ctrl=100, seed=1):
     np.random.seed(seed)

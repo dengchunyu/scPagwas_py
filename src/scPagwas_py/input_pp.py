@@ -1,12 +1,7 @@
-import scanpy as sc
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
-from scipy.sparse import csc_matrix
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
 from sklearn.utils.extmath import randomized_svd
-import pybedtools
 from pybedtools import BedTool
 
 def scdata_process(Pagwas=None,adata=None, cell_type_col='annotation'):
@@ -59,7 +54,6 @@ def scdata_process(Pagwas=None,adata=None, cell_type_col='annotation'):
     Pagwas : dict
         更新后的包含预处理过的GWAS数据的字典
     """
-from pybedtools import BedTool
 
 def snp_to_gene(gwas_data, block_annotation, marg=10000):
     gwas_data['pos_start'] = gwas_data['pos']
@@ -123,13 +117,6 @@ def GWAS_summary_input(Pagwas=None, gwas_data=None, maf_filter=0.01,
 # gwas_data = pd.read_csv('path_to_your_gwas_data.csv')
 # Pagwas = GWAS_summary_input(Pagwas={}, gwas_data=gwas_data)
 # print(Pagwas['gwas_data'])
-
-
-
-import numpy as np
-import pandas as pd
-from sklearn.decomposition import PCA
-from scipy.sparse import csr_matrix
 
 def pathway_pcascore_run(Pagwas=None, Pathway_list=None, min_pathway_size=10, max_pathway_size=1000):
     if Pathway_list is None:
@@ -201,9 +188,7 @@ def DataMatrix(df):
         'columns': df.columns   # Column labels
     }
         
-import pandas as pd
-from sklearn.decomposition import PCA
-import numpy as np
+
 
 def pathway_pca_test(Pathway_list, scCounts):
     if scCounts.index.duplicated().any():
