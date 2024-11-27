@@ -1,4 +1,18 @@
 # scPagwas_py
+
+## install the scPagwas_py
+
+```shell
+git clone https://github.com/dengchunyu/scPagwas_py.git
+conda create -n scPagwas_env python=3.8
+conda activate scPagwas_env
+cd scPagwas_py
+pip install .
+
+#update packages
+pip install --upgrade git+https://github.com/dengchunyu/scPagwas_py.git
+```
+
 ## Data Input
 ### single cell data
 
@@ -59,19 +73,6 @@ for i in range(1, 23):
     df = pd.read_csv(file_name)
     chrom_LD[chr_key] = df
 
-```
-
-## install the scPagwas_py
-
-```shell
-git clone https://github.com/dengchunyu/scPagwas_py.git
-conda create -n scPagwas_env python=3.8
-conda activate scPagwas_env
-cd scPagwas_py
-pip install .
-
-#update packages
-pip install --upgrade git+https://github.com/dengchunyu/scPagwas_py.git
 ```
 
 ## Run the input data

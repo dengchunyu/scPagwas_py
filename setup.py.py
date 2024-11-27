@@ -6,8 +6,15 @@ setup(
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     install_requires=[
-        # 在这里列出依赖，例如 "numpy>=1.21.0"
-        "numpy","pandas","sklearn","pybedtools","dask","statsmodels","warnings","scipy","joblib"
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "pybedtools",
+    "dask",
+    "statsmodels",
+    "scipy",
+    "joblib",
+    # warnings 不是一个独立的包，删除它
     ],
 )
 
