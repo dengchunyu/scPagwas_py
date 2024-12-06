@@ -13,7 +13,7 @@ pip install .
 
 #安装依赖包
 conda install -c bioconda bedtools
-pip install numpy pandas scikit-learn pybedtools dask statsmodels scipy joblib
+pip install scanpy numpy pandas scikit-learn pybedtools dask statsmodels scipy joblib
 
 
 #update packages
@@ -27,8 +27,8 @@ pip install --upgrade git+https://github.com/dengchunyu/scPagwas_py.git
 import scanpy as sc
 import pandas as pd
 
-mtx_file_counts="/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/data/GSE115978_counts.csv.gz"
-anno_file="/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/data/GSE115978_cell.annotations.csv.gz"
+mtx_file_counts="/share/pub/dengcy/scPagwas_py/data/GSE115978_counts.csv.gz"
+anno_file="/share/pub/dengcy/scPagwas_py/data/GSE115978_cell.annotations.csv.gz"
 adata = sc.read_csv(mtx_file_counts, first_column_names=True)
 adata = adata.T
 adata.var_names_make_unique()
@@ -63,7 +63,6 @@ pathway_data = {}
 with open('Genes_by_pathway_kegg.csv', mode='r', encoding='utf-8') as file:
     csv_reader = csv.reader(file)
     for row in csv_reader:
-        # 第一列是路径，第二列是基因列表
         pathway = row[0]
         genes = row[1].split(',')
         pathway_data[pathway] = genes
@@ -85,7 +84,7 @@ for i in range(1, 23):
 ## Run the input data
 
 ```python
-os.chdir('/share/pub/dengcy/scPagwas_py/src/scPagwas_py')
+#os.chdir('/share/pub/dengcy/scPagwas_py/src/scPagwas_py')
 #import input_pp
 #importlib.reload(input_pp)
 
@@ -95,7 +94,7 @@ os.chdir("/share/pub/dengcy/scPagwas_py/data")
 adata = sc.read_h5ad("scdata.adata")
 Pagwas = input_pp.scdata_process(Pagwas=None,adata=adata, cell_type_col='cell.types')
 Pagwas = input_pp.GWAS_summary_input(Pagwas=Pagwas, gwas_data=gwas_data,block_annotation=block_annotation)
-Pagwas = input_pp.pathway_pcascore_run(Pagwas=Pagwas, Pathway_list=pathway_data, min_pathway_size=10, max_pathway_size=1000)
+Pagwas = input_pp.pathway_pcascore_run(Pagwas=Pagwas, Pathway_list=pathway_data, min_pathway_size=10, max_pathway_size=1000,n_jobs=4)
 Pagwas = input_pp.pathway_annotation_input(Pagwas=Pagwas, block_annotation=block_annotation)
 ```
 

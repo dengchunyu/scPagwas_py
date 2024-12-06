@@ -66,15 +66,14 @@ def snp_to_gene(gwas_data, block_annotation, marg=10000):
     block_sorted = block_annotation[['chrom', 'start', 'end', 'label']].sort_values(by=['chrom', 'start', 'end'])
     block_bed = BedTool.from_dataframe(block_sorted)
     nearest = gwas_bed.closest(block_bed, d=True)
-    nearest_df = nearest.to_dataframe(names=['chrom', 'pos_start', 'pos_end', 'rsid', 
-                                             'chrom_gene', 'gene_start', 'gene_end', 
-                                             'label', 'distance'])
+    nearest_df = nearest.to_dataframe(names=['chrom', 'pos_start', 'pos_end', 'rsid', 'chrom_gene', 'gene_start', 'gene_end', 'label', 'distance'])
     nearest_df = nearest_df[nearest_df['distance'] == 0]
     map_result = nearest_df[['rsid', 'label', 'pos_start', 'distance']]
     map_result.columns = ['rsid', 'label', 'pos', 'Distance']
     # 保留rsid列，并同时将其设为索引
     # 使用 .loc 进行赋值，避免 SettingWithCopyWarning
     rsid_value = map_result['rsid']
+    map_result = map_result.copy(deep=True)
     map_result.loc[:, 'rsid_index'] = rsid_value
     map_result.set_index('rsid_index', inplace=True)
     return map_result
@@ -190,9 +189,13 @@ def DataMatrix(df):
         'columns': df.columns   # Column labels
     }
         
+import numpy as np
+import pandas as pd
+from sklearn.decomposition import PCA
+from joblib import Parallel, delayed
 
-
-def pathway_pca_test(Pathway_list, scCounts):
+def pathway_pca_test(Pathway_list, scCounts,n_jobs=1):
+    # 数据检查
     if scCounts.index.duplicated().any():
         raise ValueError("Duplicate gene names are not allowed - please reduce")
     if scCounts.columns.duplicated().any():
@@ -201,32 +204,50 @@ def pathway_pca_test(Pathway_list, scCounts):
         raise ValueError("NA gene names are not allowed - please fix")
     if scCounts.columns.isna().any():
         raise ValueError("NA cell names are not allowed - please fix")
+    
     scCounts = scCounts.T
-    cm = scCounts.mean(axis=0)
     proper_gene_names = scCounts.columns
     papca = {}
     pa_remove = []
-    for k, Pa_id in Pathway_list.items():
-        lab = proper_gene_names.isin(set(Pa_id) & set(proper_gene_names))
+
+    # 使用字典存储路径相关基因的索引，避免重复操作
+    pathway_genes = {k: set(Pa_id) & set(proper_gene_names) for k, Pa_id in Pathway_list.items()}
+    
+    def compute_pca_for_pathway(k, Pa_genes):
+        if not Pa_genes:
+            return None  # 没有基因则跳过
+        lab = proper_gene_names.isin(Pa_genes)
         mat = scCounts.loc[:, lab]
         try:
             pca = PCA(n_components=1)
             pca.fit(mat)
             pcs = pca.transform(mat)
-            # Adjust scores with correlation-based sign
             pcs_scores = pcs[:, 0] * np.sign(np.corrcoef(pcs[:, 0], mat.mean(axis=1))[0, 1])
-            papca[k] = {'scores': pcs_scores, 'rotation': pca.components_[0]}
-        except Exception as e:
+            return k, pcs_scores, pca.components_[0]
+        except Exception:
+            return k, None, None
+
+    # 使用并行处理加速计算每个Pathway的PCA
+    results = Parallel(n_jobs=n_jobs)(delayed(compute_pca_for_pathway)(k, Pa_genes) for k, Pa_genes in pathway_genes.items())
+    
+    # 处理结果
+    for k, pcs_scores, rotation in results:
+        if pcs_scores is None:
             pa_remove.append(k)
+        else:
+            papca[k] = {'scores': pcs_scores, 'rotation': rotation}
+    
     # Construct the DataFrame for variance scores
     vdf = pd.DataFrame({
         'name': list(papca.keys()),
         'score': [np.var(p['scores']) for p in papca.values()]
     })
+
     # Construct the DataFrame for the PCA scores
     vscore = pd.DataFrame({
         k: p['scores'] for k, p in papca.items()
     }).T
+    
     return vdf, vscore, pa_remove
 
 
@@ -237,19 +258,16 @@ import numpy as np
 from sklearn.decomposition import PCA
 from multiprocessing import Pool
 
-def pathway_pcascore_run(Pagwas=None, Pathway_list=None, min_pathway_size=10, max_pathway_size=1000):
+def pathway_pcascore_run(Pagwas=None, Pathway_list=None, min_pathway_size=10, max_pathway_size=1000,n_jobs=1):
     if Pathway_list is None or not isinstance(Pathway_list, dict):
         raise ValueError("Pathway_list must be a loaded dictionary")
-
     # Filter pathways by size
     Pathway_list = {k: v for k, v in Pathway_list.items() if min_pathway_size <= len(v) <= max_pathway_size}
-
     # Validate gene overlap
     pa_gene = set().union(*Pathway_list.values())
     intersect_genes = set(Pagwas['data_mat'].index) & pa_gene
     if len(intersect_genes) < len(pa_gene) * 0.1:
         raise ValueError("Less than 10% intersecting genes between data_mat and Pathway_list. Check gene names.")
-    
     # Filter out scarce pathways
     Pathway_list = {
         k: v for k, v in Pathway_list.items() if len(set(v) & set(Pagwas['data_mat'].index)) > 2
@@ -257,32 +275,31 @@ def pathway_pcascore_run(Pagwas=None, Pathway_list=None, min_pathway_size=10, ma
     Pagwas['rawPathway_list'] = Pathway_list
 
     # Process pathways in parallel for filtering based on cell type
-    def filter_celltype(celltype):
-        scCounts = Pagwas['data_mat'].loc[
-            :, Pagwas['Celltype_anno']['cellnames'][Pagwas['Celltype_anno']['annotation'] == celltype]
-        ]
-        proper_gene_names = scCounts.loc[scCounts.sum(axis=1) != 0].index
-        return [k for k, v in Pathway_list.items() if len(set(v) & set(proper_gene_names)) > 2]
-    
     celltypes = Pagwas['Celltype_anno']['annotation'].unique()
-    with Pool() as pool:
-        pana_list = pool.map(filter_celltype, celltypes)
-    
+    # 并行执行 filter_celltype
+    with Pool(n_jobs) as pool:
+        pana_list = pool.starmap(
+            filter_celltype,
+            [(celltype, Pagwas, Pathway_list) for celltype in celltypes]
+        )
     valid_pathways = set.intersection(*map(set, pana_list))
     Pathway_list = {k: v for k, v in Pathway_list.items() if k in valid_pathways}
     Pagwas['Pathway_list'] = Pathway_list
 
     # Compute PCA scores for each cell type in parallel
     print("* Start to get Pathway SVD score!")
-
-    def compute_pca(celltype):
+    def compute_pca(Pagwas, celltype, Pathway_list, n_jobs):
+        # 提取当前 celltype 的数据
         scCounts = Pagwas['data_mat'].loc[
             :, Pagwas['Celltype_anno']['cellnames'][Pagwas['Celltype_anno']['annotation'] == celltype]
         ]
-        return pathway_pca_test(Pathway_list=Pathway_list, scCounts=scCounts)
-
-    with Pool() as pool:
-        scPCAscore_list = pool.map(compute_pca, celltypes)
+        # 计算 PCA
+        return pathway_pca_test(Pathway_list=Pathway_list, scCounts=scCounts, n_jobs=n_jobs)
+    # 使用普通循环计算
+    scPCAscore_list = []
+    for celltype in celltypes:
+        result = compute_pca(Pagwas, celltype, Pathway_list, n_jobs)
+        scPCAscore_list.append(result)
 
     # Remove problematic pathways
     pa_remove = set().union(*[x[2] for x in scPCAscore_list])
@@ -307,6 +324,18 @@ def pathway_pcascore_run(Pagwas=None, Pathway_list=None, min_pathway_size=10, ma
 
     return Pagwas
 
+def filter_celltype(celltype, Pagwas, Pathway_list):
+    # 提取每种 celltype 的数据
+    scCounts = Pagwas['data_mat'].loc[
+        :, Pagwas['Celltype_anno']['cellnames'][Pagwas['Celltype_anno']['annotation'] == celltype]
+    ]
+    # 保留非零基因
+    proper_gene_names = scCounts.loc[scCounts.sum(axis=1) != 0].index
+    # 筛选符合条件的 pathway
+    return [k for k, v in Pathway_list.items() if len(set(v) & set(proper_gene_names)) > 2]
+
+
+
 def DataMatrix(df):
     return {
         'data': df.to_numpy(),
@@ -314,33 +343,6 @@ def DataMatrix(df):
         'columns': df.columns
     }
 
-def pathway_pca_test(Pathway_list, scCounts):
-    scCounts = scCounts.T
-    proper_gene_names = scCounts.columns
-    papca = {}
-    pa_remove = []
-
-    for k, Pa_id in Pathway_list.items():
-        lab = proper_gene_names.isin(set(Pa_id))
-        mat = scCounts.loc[:, lab]
-        try:
-            pca = PCA(n_components=1)
-            pca.fit(mat)
-            pcs = pca.transform(mat)
-            pcs_scores = pcs[:, 0] * np.sign(np.corrcoef(pcs[:, 0], mat.mean(axis=1))[0, 1])
-            papca[k] = {'scores': pcs_scores, 'rotation': pca.components_[0]}
-        except Exception:
-            pa_remove.append(k)
-
-    vdf = pd.DataFrame({
-        'name': list(papca.keys()),
-        'score': [np.var(p['scores']) for p in papca.values()]
-    })
-    vscore = pd.DataFrame({
-        k: p['scores'] for k, p in papca.items()
-    }).T
-
-    return vdf, vscore, pa_remove
 ################################
 
 def pathway_annotation_input(Pagwas, block_annotation):
