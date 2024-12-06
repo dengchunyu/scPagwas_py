@@ -4,6 +4,7 @@
 
 ```shell
 cd /share/pub/dengcy/
+rm -rf scPagwas_py
 git clone https://github.com/dengchunyu/scPagwas_py.git
 conda create -n scPagwas_env python=3.8
 conda activate scPagwas_env
@@ -84,6 +85,11 @@ for i in range(1, 23):
 ## Run the input data
 
 ```python
+os.chdir('/share/pub/dengcy/scPagwas_py/src/scPagwas_py')
+#import input_pp
+#importlib.reload(input_pp)
+
+#import regress_method
 from scPagwas_py import input_pp,regress_method,get_score
 os.chdir("/share/pub/dengcy/scPagwas_py/data")
 adata = sc.read_h5ad("scdata.adata")
@@ -96,10 +102,10 @@ Pagwas = input_pp.pathway_annotation_input(Pagwas=Pagwas, block_annotation=block
 ## Run the regression method
 
 ```python
-import regress_method
+#import importlib
+#import regress_method
 Pagwas = regress_method.link_pathway_blocks_gwas(Pagwas=Pagwas, chrom_ld=chrom_LD, singlecell=True, celltype=True,n_cores=1)
-import get_score
-importlib.reload(get_score)
+#import get_score
+#importlib.reload(get_score)
 Pagwas = get_score.sc_pagwas_perform_score(Pagwas=Pagwas, remove_outlier=True,Single_data=adata, random_times=100, iters_singlecell=100,n_topgenes=1000,n_jobs=2)
-
 ```
