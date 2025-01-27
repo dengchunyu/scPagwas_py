@@ -10,68 +10,9 @@ from scipy.stats import norm
 from scipy import stats
 from statsmodels.stats import multitest
 
-def get_pathway_sclm(pa_block, pca_scCell_mat, data_mat, rawPathway_list, n_cores=1, backingpath='', Rns=''):
-    pathway = np.unique(pa_block['block_info']['pathway'])
-    row_indices = [np.where(pca_scCell_mat['index'] == name)[0] for name in pathway]
-    row_indices = [index[0] for index in row_indices if index.size > 0]  # 只保留存在的行索引
-
-    x = np.array(pca_scCell_mat['data'][row_indices, :]).reshape(1, -1)
-
-    if pa_block['n_snps'] == 0:
-        pa_block['include_in_inference'] = False
-        pa_block['x'] = None
-        return pa_block
-
-    mg = np.intersect1d(rawPathway_list[pathway], data_mat.index)
-    if len(mg) == 1:
-        x2 = data_mat.loc[mg].values.reshape(1, -1)
-        x2 /= (x2 + 0.0001)
-    else:
-        x2 = data_mat.loc[mg].apply(lambda ge: ge / ge.sum() if ge.sum() > 0 else np.zeros(len(ge)), axis=0).values
-
-    x2 = csr_matrix(x2)
-
-    if pa_block['n_snps'] > 1:
-        x2 = x2[pa_block['snps']['label'], :]
-        pa_block['n_snps'] = x2.shape[0]
-        x = np.repeat(x, pa_block['n_snps'], axis=0)
-
-        x2 = x2.multiply(x)
-    else:
-        x2 = x2[pa_block['snps']['label'], :].reshape(1, -1)
-        pa_block['n_snps'] = x2.shape[0]
-        x = np.repeat(x, pa_block['n_snps'], axis=0)
-        x2 = x2.multiply(x)
-
-    pa_block['x'] = csr_matrix(pa_block['ld_matrix_squared'].dot(x2))
-    pa_block['include_in_inference'] = True
-
-    noise_per_snp = pa_block['snps']['se'] ** 2
-
-    if pa_block['x'] is not None:
-        if pa_block['n_snps'] > 2:
-            na_elements = np.isnan(pa_block['y']) | np.any(np.isnan(pa_block['x'].toarray()), axis=1) | np.isnan(noise_per_snp)
-
-            results = sc_parameter_regression(
-                Pagwas_x=pa_block['x'][~na_elements],
-                Pagwas_y=pa_block['y'][~na_elements],
-                noise_per_snp=noise_per_snp[~na_elements],
-                Rns=Rns,
-                backingpath=backingpath,
-                n_cores=n_cores
-            )
-            results[np.isnan(results)] = 0
-            return pd.Series(results, index=data_mat.columns)
-        else:
-            return None
-    else:
-        return None
-
-
 def sc_pagwas_perform_score(Pagwas, Single_data, iters_singlecell,n_topgenes,remove_outlier=True,random_times=100,n_jobs=1):
     Pathway_sclm_results = Pagwas['Pathway_sclm_results']
     Pathway_names = Pathway_sclm_results.columns
-
     pathway_expr = {}
     for pa in Pathway_names:
         a = np.intersect1d(Pagwas['Pathway_list'][pa], Pagwas['data_mat'].index)
@@ -81,38 +22,18 @@ def sc_pagwas_perform_score(Pagwas, Single_data, iters_singlecell,n_topgenes,rem
             pathway_expr[pa] = Pagwas['data_mat'].loc[a].values
         else:
             pathway_expr[pa] = Pagwas['data_mat'].loc[a].mean(axis=0).values
-
     pathway_expr_df = pd.DataFrame.from_dict(pathway_expr, orient='index').T
     row_indices = [np.where(Pagwas['pca_scCell_mat']['index'] == name)[0] for name in Pathway_names]
     row_indices = [index[0] for index in row_indices if index.size > 0]  # 只保留存在的行索引
-
     pa_exp_mat = Pagwas['pca_scCell_mat']['data'][row_indices, :].T * pathway_expr_df.values
     Pagwas['Pathway_single_results'] = Pathway_sclm_results[Pathway_names].values * pa_exp_mat
-
-    #cl = np.unique(Pagwas['Celltype_anno']['annotation'])
     scPagwas_gPAS_score = Pagwas['Pathway_single_results'].sum(axis=1)
-
     if remove_outlier:
         scPagwas_gPAS_score = sc_pagwas_score_filter(scPagwas_gPAS_score)
-
     Pagwas['scPagwas.gPAS.score'] = scPagwas_gPAS_score
     Pagwas = sc_get_pcc2(Pagwas, random_times=random_times,n_jobs=n_jobs)
     Pagwas = get_trs_score(Pagwas, Single_data, iters_singlecell=iters_singlecell, n_topgenes=n_topgenes)
-
     return Pagwas
-
-
-def sc_parameter_regression(Pagwas_x, Pagwas_y):
-    if Pagwas_x.shape[1] <= 20000:
-        model = LinearRegression()
-        model.fit(Pagwas_x, Pagwas_y)
-        return model.coef_
-    else:
-        # Split Pagwas_x into chunks of 10,000 columns
-        n = Pagwas_x.shape[1] // 10000
-        split_cols = np.array_split(np.arange(Pagwas_x.shape[1]), n)
-        results = [LinearRegression().fit(Pagwas_x[:, cols], Pagwas_y).coef_ for cols in split_cols]
-        return np.concatenate(results)
 
 
 def sc_pagwas_score_filter(scPagwas_score):

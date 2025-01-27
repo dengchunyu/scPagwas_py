@@ -126,7 +126,6 @@ else:
 if 'Pathway_ld_gwas_data' in Pagwas:
     for pathway, data in Pagwas['Pathway_ld_gwas_data'].items():
         print(f"\n通路名称: {pathway}")
-        print("区块信息:\n", data['block_info'].head())
         print("SNP 列表:\n", data['snps'].head())
 else:
     print("未找到通路 LD-GWAS 数据块。")
