@@ -1,4 +1,4 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.2
 Name: example_package_cabbage
 Version: 0.0.1
 Summary: A small example package
@@ -68,6 +68,8 @@ import os
 import csv
 
 os.chdir('/share/pub/dengcy/scPagwas_py/data/')
+os.chdir('/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/data/')
+
 # 打开文件并指定制表符为分隔符
 gwas_data = pd.read_csv('GWAS_summ_example.txt', sep=' ')
 
@@ -88,6 +90,8 @@ block_annotation = pd.read_csv("block_annotation.csv")
 # 定义存储数据的字典
 chrom_LD = {}
 os.chdir('/share/pub/dengcy/scPagwas_py/data/LD')
+os.chdir('/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/data/LD')
+
 # 读取每个CSV文件并存储到字典中
 for i in range(1, 23):
     file_name = f'{i}.csv'
@@ -106,11 +110,19 @@ for i in range(1, 23):
 
 #import regress_method
 from scPagwas_py import input_pp,regress_method,get_score
+#去除scPagwas_py，重新导入
+import importlib
+importlib.reload(input_pp)
+importlib.reload(regress_method)
+importlib.reload(get_score)
+
 os.chdir("/share/pub/dengcy/scPagwas_py/data")
+os.chdir("/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/data")
+
 adata = sc.read_h5ad("scdata.adata")
 Pagwas = input_pp.scdata_process(Pagwas=None,adata=adata, cell_type_col='cell.types')
 Pagwas = input_pp.GWAS_summary_input(Pagwas=Pagwas, gwas_data=gwas_data,block_annotation=block_annotation)
-Pagwas = input_pp.pathway_pcascore_run(Pagwas=Pagwas, Pathway_list=pathway_data, min_pathway_size=10, max_pathway_size=1000,n_jobs=20)
+Pagwas = input_pp.pathway_pcascore_run(Pagwas=Pagwas, Pathway_list=pathway_data, min_pathway_size=10, max_pathway_size=1000,n_jobs=10)
 Pagwas = input_pp.pathway_annotation_input(Pagwas=Pagwas, block_annotation=block_annotation)
 ```
 
@@ -120,6 +132,23 @@ Pagwas = input_pp.pathway_annotation_input(Pagwas=Pagwas, block_annotation=block
 #import importlib
 #import regress_method
 Pagwas = regress_method.link_pathway_blocks_gwas(Pagwas=Pagwas, chrom_ld=chrom_LD, singlecell=True, celltype=True,n_cores=5)
+print("Pagwas 包含的键:", list(Pagwas.keys()))
+if 'Pathway_sclm_results' in Pagwas and Pagwas['Pathway_sclm_results'] is not None:
+    print("通路单细胞回归结果前 5 行:\n", Pagwas['Pathway_sclm_results'].head())
+else:
+    print("未找到通路单细胞回归结果。")
+if 'Pathway_ld_gwas_data' in Pagwas:
+    for pathway, data in Pagwas['Pathway_ld_gwas_data'].items():
+        print(f"\n通路名称: {pathway}")
+        print("区块信息:\n", data['block_info'].head())
+        print("SNP 列表:\n", data['snps'].head())
+else:
+    print("未找到通路 LD-GWAS 数据块。")
+if 'lm_results' in Pagwas:
+    print("回归参数:\n", Pagwas['lm_results']['parameters'])
+    print("模型摘要:\n", Pagwas['lm_results']['model'].summary())
+else:
+    print("未找到线性回归结果。")
 #import get_score
 #importlib.reload(get_score)
 Pagwas = get_score.sc_pagwas_perform_score(Pagwas=Pagwas, remove_outlier=True,Single_data=adata, random_times=100, iters_singlecell=100,n_topgenes=1000,n_jobs=5)

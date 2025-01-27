@@ -96,6 +96,12 @@ for i in range(1, 23):
 
 #import regress_method
 from scPagwas_py import input_pp,regress_method,get_score
+#去除scPagwas_py，重新导入
+import importlib
+importlib.reload(input_pp)
+importlib.reload(regress_method)
+importlib.reload(get_score)
+
 os.chdir("/share/pub/dengcy/scPagwas_py/data")
 os.chdir("/Users/chunyudeng/Library/CloudStorage/OneDrive-共享的库-Onedrive/RPakage/scPagwas_py/data")
 
@@ -111,7 +117,24 @@ Pagwas = input_pp.pathway_annotation_input(Pagwas=Pagwas, block_annotation=block
 ```python
 #import importlib
 #import regress_method
-Pagwas = regress_method.link_pathway_blocks_gwas(Pagwas=Pagwas, chrom_ld=chrom_LD, singlecell=True, celltype=True,n_cores=1)
+Pagwas = regress_method.link_pathway_blocks_gwas(Pagwas=Pagwas, chrom_ld=chrom_LD, singlecell=True, celltype=True,n_cores=5)
+print("Pagwas 包含的键:", list(Pagwas.keys()))
+if 'Pathway_sclm_results' in Pagwas and Pagwas['Pathway_sclm_results'] is not None:
+    print("通路单细胞回归结果前 5 行:\n", Pagwas['Pathway_sclm_results'].head())
+else:
+    print("未找到通路单细胞回归结果。")
+if 'Pathway_ld_gwas_data' in Pagwas:
+    for pathway, data in Pagwas['Pathway_ld_gwas_data'].items():
+        print(f"\n通路名称: {pathway}")
+        print("区块信息:\n", data['block_info'].head())
+        print("SNP 列表:\n", data['snps'].head())
+else:
+    print("未找到通路 LD-GWAS 数据块。")
+if 'lm_results' in Pagwas:
+    print("回归参数:\n", Pagwas['lm_results']['parameters'])
+    print("模型摘要:\n", Pagwas['lm_results']['model'].summary())
+else:
+    print("未找到线性回归结果。")
 #import get_score
 #importlib.reload(get_score)
 Pagwas = get_score.sc_pagwas_perform_score(Pagwas=Pagwas, remove_outlier=True,Single_data=adata, random_times=100, iters_singlecell=100,n_topgenes=1000,n_jobs=5)
