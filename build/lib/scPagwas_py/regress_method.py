@@ -10,81 +10,33 @@ from statsmodels.tools.tools import add_constant
 import warnings
 from statsmodels.stats.multitest import multipletests
 
-from concurrent.futures import ThreadPoolExecutor
-import warnings
-import pandas as pd
-import numpy as np
-from tqdm import tqdm  # 添加进度条库
-
 def link_pathway_blocks_gwas(Pagwas, chrom_ld=None, singlecell=True, celltype=True, n_cores=1):
-    """优化后的主函数：并行处理通路区块与GWAS数据的关联"""
-    
-    # ------------------------------
-    # 1. 输入数据检查
-    # ------------------------------
-    required_keys = ['pathway_blocks', 'gwas_data', 'snp_gene_df']
-    for key in required_keys:
-        if key not in Pagwas:
-            raise KeyError(f"Pagwas字典缺少必要键 '{key}'，请检查输入数据！")
-    
-    # ------------------------------
-    # 2. 数据预处理
-    # ------------------------------
-    # 按染色体拆分GWAS数据（预分组，避免重复计算）
+    # Split pathway blocks by chromosome
+    Pachrom_block_list = {
+        pathway: {
+            chrom: group.reset_index(drop=True)  # 将每个分组转换为 DataFrame
+            for chrom, group in pathway_blocks.groupby('chrom')
+        }
+        for pathway, pathway_blocks in Pagwas['pathway_blocks'].items()
+        }
+
+
+    # Split GWAS data by chromosome
     chrom_gwas_list = {
-        chrom: gwas_data.sort_values(by='pos')
-        for chrom, gwas_data in Pagwas['gwas_data'].groupby('chrom')
+        chrom: gwas_data.sort_values(by='pos') for chrom, gwas_data in Pagwas['gwas_data'].groupby('chrom')
     }
-    
-    # 按染色体拆分通路区块（惰性生成器，减少内存占用）
-    def generate_pathway_blocks():
-        for pathway, pathway_blocks in Pagwas['pathway_blocks'].items():
-            yield pathway, {
-                chrom: group.reset_index(drop=True)
-                for chrom, group in pathway_blocks.groupby('chrom')
-            }
-    
-    # ------------------------------
-    # 3. 并行处理通路区块
-    # ------------------------------
-    results = []
-    with ThreadPoolExecutor(max_workers=n_cores) as executor:
-        futures = []
-        
-        # 提交任务到线程池
-        for pathway, Pa_chrom_block in generate_pathway_blocks():
-            futures.append(
-                executor.submit(
-                    process_pathway_block,
-                    pathway, Pa_chrom_block, chrom_ld, chrom_gwas_list, Pagwas, singlecell, celltype
-                )
-            )
-        
-        # 使用tqdm显示进度条
-        with tqdm(total=len(futures), desc="Processing Pathway Blocks") as pbar:
-            for future in futures:
-                results.append(future.result())
-                pbar.update(1)
-    
-    # ------------------------------
-    # 4. 结果整合
-    # ------------------------------
-    pathway_sclm_results = {}
-    pathway_ld_gwas_data = {}
-    
-    for pathway, pa_block, singlecell_result in results:
-        if singlecell and singlecell_result is not None:
-            pathway_sclm_results[pathway] = singlecell_result
-        if celltype:
-            pathway_ld_gwas_data[pathway] = pa_block
-    
-    # 存储到Pagwas字典
-    if singlecell:
-        Pagwas['Pathway_sclm_results'] = pd.DataFrame(pathway_sclm_results)
-        Pagwas['Pathway_sclm_results'].index = Pagwas['data_mat'].columns  # 假设data_mat存在
-    
-    if celltype:
-        Pagwas['Pathway_ld_gwas_data'] = pathway_ld_gwas_data
+
+    # Run the pathway block function with Dask for parallel processing
+    with ProgressBar():
+        Pagwas = pathway_block_func(
+            Pagwas=Pagwas,
+            Pachrom_block_list=Pachrom_block_list,
+            chrom_ld=chrom_ld,
+            chrom_gwas_list=chrom_gwas_list,
+            singlecell=singlecell,
+            celltype=celltype,
+            n_cores=n_cores
+        )
     
     return Pagwas
 
@@ -122,66 +74,48 @@ def pathway_block_func(Pagwas, Pachrom_block_list, chrom_gwas_list, singlecell=T
 
 
 def process_pathway_block(pathway, Pa_chrom_block, chrom_ld, chrom_gwas_list, Pagwas, singlecell, celltype, n_cores):
-    """优化后的通路区块处理函数"""
     Pa_chrom_data = []
-    
     for chrom, chrom_block in Pa_chrom_block.items():
-        # 获取LD和GWAS数据（添加空值保护）
-        ld_data = chrom_ld.get(chrom, pd.DataFrame(columns=['SNP_A', 'SNP_B', 'r2']))  # 空DataFrame避免KeyError
+        ld_data = chrom_ld.get(chrom, None)
+        if ld_data is None:
+            print(f"Warning: {chrom} for GWAS is missing, could be a problem!")
+            continue
         gwas_data = chrom_gwas_list.get(chrom, None)
-        
         if gwas_data is None:
-            warnings.warn(f"染色体 {chrom} 的GWAS数据缺失，跳过处理。")
+            print(f"Warning: {chrom} data missing, could be a problem!")
             continue
-        
-        # 使用索引加速rsid匹配（替代pd.merge）
-        snp_labels = chrom_block['label'].unique()
-        snp_info = Pagwas['snp_gene_df'].loc[Pagwas['snp_gene_df']['label'].isin(snp_labels), ['rsid', 'label']]
-        rsid_map = snp_info.set_index('label')['rsid'].to_dict()
-        
-        # 提取匹配的rsid（向量化操作）
-        valid_rsids = gwas_data['rsid'][gwas_data['rsid'].isin(rsid_map.values())]
-        if valid_rsids.empty:
+        rsids = Pagwas['snp_gene_df'].loc[Pagwas['snp_gene_df']['label'].isin(chrom_block['label']), ['rsid', 'label']]
+        rsids_gwas = pd.merge(rsids, gwas_data, on='rsid', how='inner')
+        if rsids_gwas.empty:
             continue
+        beta_squared = rsids_gwas['beta'] ** 2
+        sub_ld = ld_data[ld_data['SNP_A'].isin(rsids_gwas['rsid'])]
+        Pa_chrom_data.append((rsids_gwas, beta_squared, sub_ld, chrom_block))
         
-        # 计算beta平方（避免原地修改）
-        beta_squared = gwas_data.loc[gwas_data['rsid'].isin(valid_rsids), 'beta'].values ** 2
-        
-        # 提取子LD矩阵（使用索引加速）
-        sub_ld = ld_data[ld_data['SNP_A'].isin(valid_rsids) & ld_data['SNP_B'].isin(valid_rsids)]
-        
-        Pa_chrom_data.append((valid_rsids, beta_squared, sub_ld, chrom_block))
-    
-        # 合并数据（空数据保护）
-        if not Pa_chrom_data:
-            return pathway, None, None
-    
-        # 后续逻辑保持不变...
-            
-        pa_block = {
-            'block_info': pd.concat([item[3] for item in Pa_chrom_data]),
-            'snps': pd.concat([item[0] for item in Pa_chrom_data]),
-            'y': np.concatenate([item[1] for item in Pa_chrom_data]),
-            'ld_data': pd.concat([item[2] for item in Pa_chrom_data])
-            }
-        snp_a = set(pa_block['ld_data']['SNP_A'].dropna().values)
-        snp_b = set(pa_block['ld_data']['SNP_B'].dropna().values)
-        ld_data_unique = snp_a.union(snp_b)
-        rsid_x = set(pa_block['snps']['rsid'].values) & ld_data_unique
+    pa_block = {
+        'block_info': pd.concat([item[3] for item in Pa_chrom_data]),
+        'snps': pd.concat([item[0] for item in Pa_chrom_data]),
+        'y': np.concatenate([item[1] for item in Pa_chrom_data]),
+        'ld_data': pd.concat([item[2] for item in Pa_chrom_data])
+        }
+    snp_a = set(pa_block['ld_data']['SNP_A'].dropna().values)
+    snp_b = set(pa_block['ld_data']['SNP_B'].dropna().values)
+    ld_data_unique = snp_a.union(snp_b)
+    rsid_x = set(pa_block['snps']['rsid'].values) & ld_data_unique
 
-        pa_block['ld_data'] = pa_block['ld_data'][pa_block['ld_data']['SNP_A'].isin(rsid_x) & pa_block['ld_data']['SNP_B'].isin(rsid_x)]
-        if pa_block['ld_data'].empty:
-            ld_matrix = np.eye(len(pa_block['snps']))
-        else:
-            ld_matrix = make_ld_matrix(pa_block['snps']['rsid'], pa_block['ld_data'])
-        pa_block['ld_matrix_squared'] = ld_matrix ** 2
-        pa_block['n_snps'] = len(pa_block['snps'])
-        singlecell_result = None
-        if singlecell:
-            singlecell_result = get_pathway_sclm(pa_block, Pagwas['pca_scCell_mat'], Pagwas['data_mat'], Pagwas['rawPathway_list'],  n_cores)
-        if celltype:
-            pa_block = link_pwpca_block(pa_block, pca_cell_df=Pagwas['pca_cell_df'], merge_scexpr=Pagwas['avg_expr_matrix'],rawPathway_list= Pagwas['rawPathway_list'],snp_gene_df=Pagwas['snp_gene_df'])
-        return pathway, pa_block, singlecell_result
+    pa_block['ld_data'] = pa_block['ld_data'][pa_block['ld_data']['SNP_A'].isin(rsid_x) & pa_block['ld_data']['SNP_B'].isin(rsid_x)]
+    if pa_block['ld_data'].empty:
+        ld_matrix = np.eye(len(pa_block['snps']))
+    else:
+        ld_matrix = make_ld_matrix(pa_block['snps']['rsid'], pa_block['ld_data'])
+    pa_block['ld_matrix_squared'] = ld_matrix ** 2
+    pa_block['n_snps'] = len(pa_block['snps'])
+    singlecell_result = None
+    if singlecell:
+        singlecell_result = get_pathway_sclm(pa_block, Pagwas['pca_scCell_mat'], Pagwas['data_mat'], Pagwas['rawPathway_list'],  n_cores)
+    if celltype:
+        pa_block = link_pwpca_block(pa_block, pca_cell_df=Pagwas['pca_cell_df'], merge_scexpr=Pagwas['avg_expr_matrix'],rawPathway_list= Pagwas['rawPathway_list'],snp_gene_df=Pagwas['snp_gene_df'])
+    return pathway, pa_block, singlecell_result
 
 def make_ld_matrix(all_snps, ld_data):
     mat_dim = len(all_snps)
@@ -214,6 +148,21 @@ def make_ld_matrix(all_snps, ld_data):
                 ld_matrix.iloc[idx_b, idx_a] = r2_value
 
     return ld_matrix.values  # 返回 NumPy 数组格式的 LD 矩阵
+
+
+def make_ld_matrix2(all_snps, ld_data):
+    """
+    Constructs an LD matrix for the specified SNPs.
+    """
+    snp_indices = {snp: idx for idx, snp in enumerate(all_snps)}
+    mat_dim = len(all_snps)
+    ld_matrix = np.eye(mat_dim)
+    for _, row in ld_data.iterrows():
+        i = snp_indices.get(row['SNP_A'])
+        j = snp_indices.get(row['SNP_B'])
+        if i is not None and j is not None:
+            ld_matrix[i, j] = ld_matrix[j, i] = row['r2']
+    return ld_matrix
 
 
 def link_pwpca_block(pa_block, pca_cell_df, merge_scexpr, snp_gene_df, rawPathway_list):
@@ -310,13 +259,7 @@ def get_pathway_sclm(pa_block, pca_scCell_mat, data_mat, rawPathway_list, n_core
     #x2 = DataMatrix(x2)
     pa_block_snps_labels = pa_block['snps']['label'].values
     # 找到与 mg 中基因匹配的行索引
-    rows_to_extract = [i for i, label in enumerate(pa_block_snps_labels) if label in mg]
-
-    if len(rows_to_extract) == 0:
-        raise ValueError(f"No valid rows to extract. Check alignment between pa_block_snps_labels and mg.")
-
-    if max(rows_to_extract) >= x2.shape[0]:
-        raise IndexError(f"rows_to_extract contains indices out of bounds for x2 with shape {x2.shape}")
+    rows_to_extract = [i for i in range(len(pa_block_snps_labels)) if pa_block_snps_labels[i] in mg]
 
     if pa_block['n_snps'] > 1:
         x2 = x2[rows_to_extract]
@@ -325,7 +268,6 @@ def get_pathway_sclm(pa_block, pca_scCell_mat, data_mat, rawPathway_list, n_core
         x2 = x2 * x
     else:
         x2 = np.multiply(x2[rows_to_extract], x)
-
 
     pa_block['x'] = pa_block['ld_matrix_squared'] @ x2
     pa_block['include_in_inference'] = True
